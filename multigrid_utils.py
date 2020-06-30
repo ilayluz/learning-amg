@@ -54,16 +54,8 @@ def two_grid_error_matrix(A, P, R, S):
     I = tf.eye(A.shape[0].value, dtype=A.dtype)
     coarse_A = compute_coarse_A(R, A, P)
     coarse_A_inv = tf.linalg.inv(coarse_A)
-    # upper_coarse_A = tf.linalg.band_part(coarse_A, 0, -1) - tf.linalg.band_part(coarse_A, 0, 0)
-    # coarse_S = tf.linalg.triangular_solve(coarse_A, -upper_coarse_A, lower=True)
-    # curr_power = coarse_A
-    # for i in range(9):
-    #     curr_power = coarse_S @ curr_power @ coarse_S
-    # coarse_A_inv = curr_power
     C = compute_C(A, I, P, R, coarse_A_inv)
     M = S @ C @ S
-
-    # coarse_A_cond = tf.convert_to_tensor(np.linalg.cond(coarse_A))
     return M
 
 
@@ -73,49 +65,6 @@ def compute_C(A, I, P, R, coarse_A_inv):
     P_coarse_A_inv_RA = P @ coarse_A_inv_RA
     C = I - P_coarse_A_inv_RA
     return C
-
-
-def tf_pinv(a):
-    """copy of tf.linalg.pinv() in tensorflow 1.15"""
-    rcond = None
-    dtype = a.dtype.as_numpy_dtype
-    if rcond is None:
-      num_rows = a.shape[0].value
-      num_cols = a.shape[1].value
-      if isinstance(num_rows, int) and isinstance(num_cols, int):
-        max_rows_cols = float(max(num_rows, num_cols))
-      else:
-        max_rows_cols = tf.cast(
-            tf.maximum(num_rows, num_cols), dtype)
-      rcond = 10. * max_rows_cols * np.finfo(dtype).eps
-
-    rcond = tf.convert_to_tensor(rcond, dtype=dtype, name='rcond')
-
-    [
-        singular_values,  # Sigma
-        left_singular_vectors,  # U
-        right_singular_vectors,  # V
-    ] = tf.linalg.svd(
-        a, full_matrices=False, compute_uv=True)
-
-    # Saturate small singular values to inf. This has the effect of make
-    # `1. / s = 0.` while not resulting in `NaN` gradients.
-    cutoff = rcond * tf.reduce_max(singular_values, axis=-1)
-    singular_values = tf.where_v2(
-        singular_values > tf.expand_dims(cutoff, -1), singular_values,
-        np.array(np.inf, dtype))
-
-    # By the definition of the SVD, `a == u @ s @ v^H`, and the pseudo-inverse
-    # is defined as `pinv(a) == v @ inv(s) @ u^H`.
-    a_pinv = tf.matmul(
-        right_singular_vectors / tf.expand_dims(singular_values, -2),
-        left_singular_vectors,
-        adjoint_b=True)
-
-    if a.shape is not None and a.shape.rank is not None:
-      a_pinv.set_shape(a.shape[:-2].concatenate([a.shape[-1], a.shape[-2]]))
-
-    return a_pinv
 
 
 def block_diag_multiply(W_conj_t, As, W):
@@ -477,35 +426,3 @@ def test_block_diagonalize_P():
     M_eigs = np.sort(np.linalg.eigvals(M))
 
     pass
-
-
-if __name__ == '__main__':
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    tf.enable_eager_execution(config=config)
-
-    test_block_diagonalize_P()
-
-    # matlab_engine = matlab.engine.start_matlab()
-    # matlab_engine.eval('rng(1)')  # fix random seed for reproducibility
-    #
-    # def generate_A_delaunay_block_periodic_lognormal(num_unknowns_per_block, root_num_blocks, matlab_engine):
-    #     """Poisson equation on triangular mesh, with lognormal coefficients, and block periodic boundary conditions"""
-    #     # points are correct only for 3x3 number of blocks
-    #     A_matlab = matlab_engine.block_periodic_delaunay(num_unknowns_per_block, root_num_blocks,
-    #                                                                     nargout=1)
-    #     A_numpy = np.array(A_matlab._data).reshape(A_matlab.size, order='F')
-    #     return csr_matrix(A_numpy)
-    #
-    #
-    # batch_size = 32
-    # As = [generate_A_delaunay_block_periodic_lognormal(64, 4, matlab_engine) for i in tqdm(range(batch_size))]
-    # As = [A.toarray() for A in tqdm(As)]
-    # tf_As = tf.convert_to_tensor(As, dtype=tf.complex128)
-    #
-    # # block_diagonalize_A_fast(A, 4)  # warm up cache
-    # # print(timeit.timeit(lambda: block_diagonalize_A_fast(A, 4), number=10))
-    # block_diagonalize_A_fast(tf.stack([tf_As[0]]), 4, tensor=True)  # warm up cache
-    # num_runs = 10
-    # print(timeit.timeit(lambda: block_diagonalize_A_fast(tf_As, 4, tensor=True), number=num_runs) / (num_runs * batch_size))
-    # print(timeit.timeit(lambda: tf.linalg.inv(tf_As), number=num_runs) / (num_runs * batch_size))
